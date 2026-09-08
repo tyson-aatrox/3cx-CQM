@@ -1,0 +1,8 @@
+services:
+  call-monitor:
+    build:
+      context: .
+    container_name: threecx-call-monitor
+    restart: unless-stopped
+    ports:
+      - "${CALL_MONITOR_PORT:-4180}:80"

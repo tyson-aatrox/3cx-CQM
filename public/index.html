@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>3CX Call Monitoring Analyzer</title>
+
+
+
+  <link rel="stylesheet" href="app.css?v=0.4.0">
+</head>
+<body>
+  <header class="app-header utility-header">
+    <div>
+      <span class="eyebrow">CALL QUALITY</span>
+      <h1>3CX Call Monitoring Analyzer</h1>
+      <p>Import a 3CX Call Monitor event-log export to identify degraded calls, affected endpoints and likely fault domains.</p>
+    </div>
+    <div class="app-header-actions">
+      
+      <div class="badge">v0.4.0 · Standalone · Local processing</div>
+    </div>
+  </header>
+
+  <main class="utility-main quality-main">
+    <section class="utility-panel">
+      <div class="quality-section-head">
+        <div>
+          <span class="eyebrow">IMPORT</span>
+          <h2>Call Monitor Export</h2>
+          <p class="section-note">Upload the raw CSV exported from the 3CX Event Log. Only Call Monitor Event ID 10034 records are analysed. Processing stays in this browser.</p>
+        </div>
+      </div>
+      <div id="drop" class="quality-file-drop" tabindex="0" role="button" aria-label="Select 3CX event log CSV">
+        <div class="utility-icon quality-upload-icon" aria-hidden="true">CSV</div>
+        <div><strong>Drop event_logs.csv here</strong><span>or click to select a CSV file</span></div>
+        <input id="file" type="file" accept=".csv,text/csv">
+      </div>
+      <p id="status" class="utility-status">No CSV loaded.</p>
+    </section>
+
+    <section id="dashboard" class="quality-dashboard hidden">
+      <section class="utility-panel quality-dashboard-options">
+        <div>
+          <span class="eyebrow">DASHBOARD OPTIONS</span>
+          <h2>Statistics Scope</h2>
+          <p class="section-note">Choose which media legs contribute to aggregate call-quality statistics. Individual call details always retain every leg from the 3CX export.</p>
+        </div>
+        <label class="quality-toggle">
+          <input id="excludeNoRtcp" type="checkbox" checked>
+          <span class="quality-toggle-control" aria-hidden="true"></span>
+          <span><strong>Exclude legs without RTCP</strong><small>Recommended when the SIP carrier does not provide RTCP reporting.</small></span>
+        </label>
+        <div id="rtcpScope" class="quality-scope-note"></div>
+      </section>
+
+      <div id="cards" class="quality-stat-grid"></div>
+
+      <div class="quality-grid-two">
+        <section class="utility-panel quality-health-panel"><div class="quality-panel-heading"><div><span class="eyebrow">SUMMARY</span><h2>Overall Call Quality Health</h2></div></div><div id="qualityGauge"></div></section>
+        <section class="utility-panel"><div class="quality-panel-heading"><div><span class="eyebrow">DIAGNOSIS</span><h2>Likely Fault Domain</h2></div></div><div id="domainBars"></div></section>
+      </div>
+
+      <section class="utility-panel">
+        <div class="quality-toolbar"><div><span class="eyebrow">ENDPOINTS</span><h2>Affected Users / Endpoints</h2></div><input id="userSearch" placeholder="Search user, IP or device"></div>
+        <div class="quality-table-wrap"><table class="quality-table"><thead><tr><th>User</th><th>Calls</th><th>Poor</th><th>Warning</th><th>Avg RTT</th><th>Max Jitter</th><th>Max Loss</th><th>Endpoint</th></tr></thead><tbody id="users"></tbody></table></div>
+      </section>
+
+      <section class="utility-panel">
+        <div class="quality-toolbar quality-call-toolbar"><div><span class="eyebrow">CALLS</span><h2>Monitored Calls</h2></div><div class="quality-filters"><input id="search" placeholder="Search number, user, IP or reason"><select id="quality"><option value="">All quality</option><option>Good</option><option>Warning</option><option>Poor</option><option>Inconclusive</option></select><select id="domain"><option value="">All fault domains</option></select></div></div>
+        <div class="quality-table-wrap"><table class="quality-table"><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Fault Domain</th><th>Issues</th><th>Transcoding</th><th></th></tr></thead><tbody id="calls"></tbody></table></div>
+      </section>
+    </section>
+  </main>
+
+  <footer>Internal 3CX utilities. Call quality results are diagnostic indicators and should be correlated with the call path and customer report.</footer>
+  <div id="modal" class="quality-modal hidden" role="dialog" aria-modal="true" aria-label="Call quality detail"><div class="quality-modal-box"><button id="close" class="quality-close" aria-label="Close">×</button><div id="detail"></div></div></div>
+  <script src="app.js?v=0.4.0"></script>
+</body>
+</html>
