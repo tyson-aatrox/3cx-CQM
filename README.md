@@ -42,11 +42,13 @@ Extract the release, enter the folder and run:
 docker compose up -d --build
 ```
 
-Open:
+The container binds to localhost only by default:
 
 ```text
-http://SERVER-IP:4180/
+http://127.0.0.1:4180/
 ```
+
+Expose it through the host Nginx reverse proxy rather than publishing the container directly.
 
 ## Change the port
 
@@ -56,10 +58,10 @@ Example using port 8080:
 CALL_MONITOR_PORT=8080 docker compose up -d
 ```
 
-Then open:
+The service will then listen on:
 
 ```text
-http://SERVER-IP:8080/
+http://127.0.0.1:8080/
 ```
 
 ## Check status

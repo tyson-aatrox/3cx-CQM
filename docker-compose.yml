@@ -5,4 +5,4 @@ services:
     container_name: threecx-call-monitor
     restart: unless-stopped
     ports:
-      - "${CALL_MONITOR_PORT:-4180}:80"
+      - "127.0.0.1:${CALL_MONITOR_PORT:-4180}:80"
