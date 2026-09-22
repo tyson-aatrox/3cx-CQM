@@ -33,7 +33,10 @@
     const keys=['A-B','A<-B','B-C','B<-C'];return keys.map(k=>{const xs=calls.map(c=>mediaPathSummary(c,k)).filter(x=>x.status!=='Unavailable'),poor=xs.filter(x=>x.status==='Poor').length,warn=xs.filter(x=>x.status==='Warning').length;return {label:xs[0]?.label||k,total:xs.length,poor,warn,rate:pct(poor+warn,xs.length)}})
   }
   function pathBlock(calls){
-    return '<div class="report-path-grid">'+pathAggregate(calls).map(x=>'<div class="'+(x.poor?'poor':x.warn?'warning':'good')+'"><strong>'+esc(x.label)+'</strong><b>'+x.rate+'%</b><span>degraded</span><small>'+x.poor+' poor · '+x.warn+' warning · '+x.total+' measured</small></div>').join('')+'</div><p class="report-note">A and C represent call endpoints; B represents the 3CX PBX. Percentages show paths classified Warning or Poor where path telemetry was measurable.</p>';
+    const paths=pathAggregate(calls), cls=x=>x.poor?'poor':x.warn?'warning':'good';
+    const cards='<div class="report-path-grid">'+paths.map(x=>'<div class="'+cls(x)+'"><strong>'+esc(x.label)+'</strong><b>'+x.rate+'%</b><span>degraded</span><small>'+x.poor+' poor · '+x.warn+' warning · '+x.total+' measured</small></div>').join('')+'</div>';
+    const topology='<div class="report-topology"><div class="report-node"><b>A</b><span>Endpoint A</span></div><div class="report-link"><span>'+esc(paths[0]?.rate??0)+'% →</span><span>← '+esc(paths[1]?.rate??0)+'%</span></div><div class="report-node pbx"><b>B</b><span>3CX PBX</span></div><div class="report-link"><span>'+esc(paths[2]?.rate??0)+'% →</span><span>← '+esc(paths[3]?.rate??0)+'%</span></div><div class="report-node"><b>C</b><span>Endpoint C</span></div></div>';
+    return topology+cards+'<p class="report-note">A and C represent call endpoints; B represents the 3CX PBX. Percentages show paths classified Warning or Poor where path telemetry was measurable.</p>';
   }
   function domainBlock(s){
     const total=Math.max(1,s.total_calls);return '<div class="report-domain-list">'+Object.entries(s.domains).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div><span>'+esc(k)+'</span><i><em style="width:'+pct(v,total)+'%"></em></i><b>'+v+'</b></div>').join('')+'</div>';
@@ -41,6 +44,14 @@
   function eventBlock(){
     const cut=intervention(),label=$('#reportInterventionLabel').value.trim()||'Investigation change';
     return cut?'<div class="report-event"><b>'+esc(cut.toLocaleString())+'</b><span>'+esc(label)+'</span></div>':'<p class="report-note">No intervention marker has been recorded.</p>';
+  }
+  function metricNarrative(s){
+    const parts=[];
+    if(Number.isFinite(s.avg_rtt)) parts.push('Average round-trip time was '+Math.round(s.avg_rtt)+' ms'+(s.avg_rtt>=150?', which is above the poor-quality threshold':s.avg_rtt>=100?', which is elevated':''));
+    if(Number.isFinite(s.avg_jitter)) parts.push('average jitter was '+Math.round(s.avg_jitter*10)/10+' ms'+(s.avg_jitter>=30?', which is high':s.avg_jitter>=20?', which is elevated':''));
+    if(Number.isFinite(s.avg_loss)) parts.push('average packet loss was '+Math.round(s.avg_loss*100)/100+'%'+(s.avg_loss>=1?', which is high':s.avg_loss>=.5?', which is elevated':''));
+    if(Number.isFinite(s.avg_mos)) parts.push('average MOS was '+Math.round(s.avg_mos*100)/100+(s.avg_mos<3.5?', indicating poor perceived voice quality':s.avg_mos<4?', indicating reduced perceived voice quality':''));
+    return parts.length?parts.join('; ')+'.':'No aggregate RTT, jitter, packet-loss or MOS measurements were available for this period.';
   }
   function summaryText(s,calls){
     const degraded=s.quality_counts.Poor+s.quality_counts.Warning,p=pct(degraded,s.measurable_calls);
@@ -50,12 +61,12 @@
   function generate(){
     if(!DATA?.calls?.length)return;
     const calls=reportCalls(),exclude=$('#excludeNoRtcp')?.checked??true,s=summary(calls,exclude);
-    const customer=$('#reportCustomer').value.trim()||'Customer',title=$('#reportTitle').value.trim()||'Call Quality Investigation Report';
+    const customer=$('#reportCustomer').value.trim()||'Customer',title=$('#reportTitle').value.trim()||'Call Quality Investigation Report',status=$('#reportStatus')?.value||'Investigating';
     const poor=calls.filter(c=>['Poor','Warning'].includes(effectiveQuality(c,exclude))).slice(0,12);
-    $('#reportPreview').innerHTML='<article class="client-report"><header><span>CALL QUALITY MONITORING</span><h1>'+esc(title)+'</h1><p>'+esc(customer)+'</p></header>'+
+    $('#reportPreview').innerHTML='<article class="client-report"><header><span>CALL QUALITY MONITORING</span><h1>'+esc(title)+'</h1><div class="report-head-meta"><p>'+esc(customer)+'</p><span class="report-status '+esc(status.toLowerCase())+'">'+esc(status)+'</span></div></header>'+
       '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p></section>'+
       '<section><h2>Monitoring Period</h2><div class="report-kpis"><div><b>'+s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+s.measurable_calls+'</b><span>Measurable calls</span></div><div><b>'+s.quality_counts.Poor+'</b><span>Poor calls</span></div><div><b>'+s.quality_counts.Warning+'</b><span>Warning calls</span></div></div></section>'+
-      '<section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
+      '<section><h2>Quality Metrics</h2><p>'+esc(metricNarrative(s))+'</p><div class="report-metric-strip"><span><b>'+esc(Number.isFinite(s.avg_rtt)?Math.round(s.avg_rtt)+' ms':'—')+'</b>Avg RTT</span><span><b>'+esc(Number.isFinite(s.avg_jitter)?Math.round(s.avg_jitter*10)/10+' ms':'—')+'</b>Avg jitter</span><span><b>'+esc(Number.isFinite(s.avg_loss)?Math.round(s.avg_loss*100)/100+'%':'—')+'</b>Avg loss</span><span><b>'+esc(Number.isFinite(s.avg_mos)?Math.round(s.avg_mos*100)/100:'—')+'</b>Avg MOS</span></div></section><section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
       (intervention()?'<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section><section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>':'')+
       '<section><h2>Audio Path Findings</h2>'+pathBlock(calls)+'</section>'+
       '<section><h2>Fault Domain Distribution</h2>'+domainBlock(s)+'</section>'+
