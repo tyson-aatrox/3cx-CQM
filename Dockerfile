@@ -2,7 +2,7 @@ FROM nginx:1.27-alpine
 
 LABEL org.opencontainers.image.title="3CX Call Quality Analyser"
 LABEL org.opencontainers.image.description="Browser-based analyser for 3CX Call Monitor Event ID 10034 exports"
-LABEL org.opencontainers.image.version="0.5.1"
+LABEL org.opencontainers.image.version="0.6.0"
 
 RUN rm -rf /usr/share/nginx/html/*
 
