@@ -1,8 +1,10 @@
 services:
-  call-monitor:
+  call-quality-analyser:
+    image: 3cx-call-quality-analyser:latest
+    pull_policy: never
     build:
       context: .
-    container_name: threecx-call-monitor
+    container_name: 3cx-call-quality-analyser
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${CALL_MONITOR_PORT:-4180}:80"
+      - "${CALL_QUALITY_ANALYSER_PORT:-4180}:80"
