@@ -1,10 +1,10 @@
-# 3CX Call Monitoring Analyzer
+# 3CX Call Monitoring Analyser
 
-Standalone Docker release of the 3CX Call Monitoring Analyzer.
+Standalone Docker release of the 3CX Call Monitoring Analyser.
 
 ## What it does
 
-The analyzer imports a 3CX Event Log CSV and processes Call Monitor Event ID `10034` records entirely inside the user's web browser.
+The analyser imports a 3CX Event Log CSV and processes Call Monitor Event ID `10034` records entirely inside the user's web browser.
 
 It provides:
 
@@ -22,6 +22,12 @@ It provides:
 - A/B/C media-path analysis
 - four directional audio-path summaries
 - browser-localised date/time display
+- client-facing call-quality reporting
+- reporting status, monitoring scope and customer impact
+- RTT / jitter / loss / MOS reporting narrative
+- audio-path and affected-endpoint reporting
+- intervention before/after comparison
+- browser print / PDF output
 
 ## Privacy
 
@@ -55,7 +61,7 @@ Expose it through the host Nginx reverse proxy rather than publishing the contai
 Example using port 8080:
 
 ```bash
-CALL_MONITOR_PORT=8080 docker compose up -d
+CALL_QUALITY_ANALYSER_PORT=8080 docker compose up -d
 ```
 
 The service will then listen on:
@@ -73,7 +79,7 @@ docker compose ps
 ## View logs
 
 ```bash
-docker logs threecx-call-monitor
+docker logs 3cx-call-quality-analyser
 ```
 
 ## Stop
@@ -104,7 +110,7 @@ Nginx container
 CSV selected by user
   |
   v
-Browser-side JavaScript parser/analyzer
+Browser-side JavaScript parser/analyser
   |
   v
 Dashboard
@@ -112,4 +118,4 @@ Dashboard
 
 ## Version
 
-0.4.0
+0.5.2
