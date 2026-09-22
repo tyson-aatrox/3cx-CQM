@@ -67,5 +67,5 @@
     $('#reportPreview').classList.remove('hidden');
   }
   window.openReporting=()=>{if(!DATA?.calls?.length)return alert('Load a Call Monitor CSV before creating a report.');$('#reporting').classList.remove('hidden');const ds=DATA.calls.map(c=>dt(c.date_time)).filter(Boolean).sort((a,b)=>a-b);if(ds.length){const iso=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)};if(!$('#reportStart').value)$('#reportStart').value=iso(ds[0]);if(!$('#reportEnd').value)$('#reportEnd').value=iso(ds.at(-1));}generate()};
-  document.addEventListener('DOMContentLoaded',()=>{$('#reportGenerate')?.addEventListener('click',generate);$('#reportPrint')?.addEventListener('click',()=>{generate();window.print()});$('#reportClose')?.addEventListener('click',()=>$('#reporting').classList.add('hidden'))});
+  document.addEventListener('DOMContentLoaded',()=>{$('#openReporting')?.addEventListener('click',()=>window.openReporting());$('#reportGenerate')?.addEventListener('click',generate);$('#reportPrint')?.addEventListener('click',()=>{generate();window.print()});$('#reportClose')?.addEventListener('click',()=>$('#reporting').classList.add('hidden'))});
 })();
