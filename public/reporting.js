@@ -53,6 +53,26 @@
     if(Number.isFinite(s.avg_mos)) parts.push('average MOS was '+Math.round(s.avg_mos*100)/100+(s.avg_mos<3.5?', indicating poor perceived voice quality':s.avg_mos<4?', indicating reduced perceived voice quality':''));
     return parts.length?parts.join('; ')+'.':'No aggregate RTT, jitter, packet-loss or MOS measurements were available for this period.';
   }
+  function endpointRows(calls,exclude){
+    const map={};
+    calls.forEach(c=>[c.party1,c.party2].filter(Boolean).forEach(p=>{const key=p.number||p.name||p.ip;if(!key)return;const x=map[key]??={name:p.name||p.number||key,number:p.number||'',calls:0,bad:0};x.calls++;if(['Poor','Warning'].includes(effectiveQuality(c,exclude)))x.bad++}));
+    return Object.values(map).filter(x=>x.bad).sort((a,b)=>b.bad-a.bad||b.calls-a.calls).slice(0,8);
+  }
+  function endpointBlock(calls,exclude){
+    const rows=endpointRows(calls,exclude);if(!rows.length)return '<p class="report-note">No repeatedly affected endpoints were identified in the selected period.</p>';
+    return '<table><thead><tr><th>Endpoint</th><th>Calls</th><th>Degraded</th><th>Degradation rate</th></tr></thead><tbody>'+rows.map(x=>'<tr><td>'+esc(x.name)+(x.number&&x.number!==x.name?' ('+esc(x.number)+')':'')+'</td><td>'+x.calls+'</td><td>'+x.bad+'</td><td>'+pct(x.bad,x.calls)+'%</td></tr>').join('')+'</tbody></table>';
+  }
+  function scopeText(calls){
+    const ds=calls.map(c=>dt(c.date_time)).filter(Boolean).sort((a,b)=>a-b);if(!ds.length)return 'No calls fall within the selected reporting period.';
+    return 'Telemetry in this report covers '+ds[0].toLocaleString()+' to '+ds.at(-1).toLocaleString()+'. Results reflect the call-quality data available from the 3CX Call Monitor export.';
+  }
+  function statusText(status,s){
+    const bad=s.quality_counts.Poor+s.quality_counts.Warning,rate=pct(bad,s.measurable_calls);
+    if(status==='Resolved')return 'The investigation is marked resolved. Current telemetry should continue to be considered alongside any new user reports.';
+    if(status==='Improved')return 'The investigation is marked improved. '+rate+'% of measurable calls in the selected period remain classified Warning or Poor.';
+    if(status==='Monitoring')return 'The investigation remains under monitoring. '+rate+'% of measurable calls in the selected period are classified Warning or Poor.';
+    return 'The investigation remains active while the identified quality indicators and affected call paths are being assessed.';
+  }
   function summaryText(s,calls){
     const degraded=s.quality_counts.Poor+s.quality_counts.Warning,p=pct(degraded,s.measurable_calls);
     const top=Object.entries(s.domains).filter(([k])=>!['No Fault Detected','Insufficient Data'].includes(k)).sort((a,b)=>b[1]-a[1])[0];
@@ -64,15 +84,19 @@
     const customer=$('#reportCustomer').value.trim()||'Customer',title=$('#reportTitle').value.trim()||'Call Quality Investigation Report',status=$('#reportStatus')?.value||'Investigating';
     const poor=calls.filter(c=>['Poor','Warning'].includes(effectiveQuality(c,exclude))).slice(0,12);
     $('#reportPreview').innerHTML='<article class="client-report"><header><span>CALL QUALITY MONITORING</span><h1>'+esc(title)+'</h1><div class="report-head-meta"><p>'+esc(customer)+'</p><span class="report-status '+esc(status.toLowerCase())+'">'+esc(status)+'</span></div></header>'+
-      '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p></section>'+
+      '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p><p class="report-status-copy">'+esc(statusText(status,s))+'</p></section>'+
+      ($('#reportImpact').value.trim()?'<section><h2>Customer Impact</h2><p>'+esc($('#reportImpact').value.trim())+'</p></section>':'')+
+      '<section><h2>Monitoring Scope</h2><p>'+esc(scopeText(calls))+'</p></section>'+
       '<section><h2>Monitoring Period</h2><div class="report-kpis"><div><b>'+s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+s.measurable_calls+'</b><span>Measurable calls</span></div><div><b>'+s.quality_counts.Poor+'</b><span>Poor calls</span></div><div><b>'+s.quality_counts.Warning+'</b><span>Warning calls</span></div></div></section>'+
       '<section><h2>Quality Metrics</h2><p>'+esc(metricNarrative(s))+'</p><div class="report-metric-strip"><span><b>'+esc(Number.isFinite(s.avg_rtt)?Math.round(s.avg_rtt)+' ms':'—')+'</b>Avg RTT</span><span><b>'+esc(Number.isFinite(s.avg_jitter)?Math.round(s.avg_jitter*10)/10+' ms':'—')+'</b>Avg jitter</span><span><b>'+esc(Number.isFinite(s.avg_loss)?Math.round(s.avg_loss*100)/100+'%':'—')+'</b>Avg loss</span><span><b>'+esc(Number.isFinite(s.avg_mos)?Math.round(s.avg_mos*100)/100:'—')+'</b>Avg MOS</span></div></section><section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
       (intervention()?'<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section><section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>':'')+
       '<section><h2>Audio Path Findings</h2>'+pathBlock(calls)+'</section>'+
       '<section><h2>Fault Domain Distribution</h2>'+domainBlock(s)+'</section>'+
+      '<section><h2>Affected Endpoints</h2><p class="report-note">Endpoints below are ranked by the number of calls classified Warning or Poor in the selected period.</p>'+endpointBlock(calls,exclude)+'</section>'+
       '<section><h2>Investigation Findings</h2><p>'+esc($('#reportFindings').value.trim()||'Engineer findings have not yet been entered.')+'</p></section>'+
       '<section><h2>Actions / Changes</h2><p>'+esc($('#reportActions').value.trim()||'No investigation actions have been recorded.')+'</p></section>'+
-      '<section><h2>Affected Call Examples</h2><table><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Fault domain</th></tr></thead><tbody>'+poor.map(c=>'<tr><td>'+esc(local(c.date_time))+'</td><td>'+esc(c.party1.number)+' ↔ '+esc(c.party2.number)+'</td><td>'+esc(effectiveQuality(c,exclude))+'</td><td>'+esc(effectiveDomain(c,exclude))+'</td></tr>').join('')+'</tbody></table></section>'+
+      ($('#reportNextSteps').value.trim()?'<section><h2>Next Steps</h2><p>'+esc($('#reportNextSteps').value.trim())+'</p></section>':'')+
+      '<section><h2>Affected Call Examples</h2><p class="report-note">Representative Warning and Poor calls from the selected period, limited to 12 examples.</p><table><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Fault domain</th></tr></thead><tbody>'+(poor.length?poor.map(c=>'<tr><td>'+esc(local(c.date_time))+'</td><td>'+esc(c.party1.number)+' ↔ '+esc(c.party2.number)+'</td><td><span class="report-quality '+esc(effectiveQuality(c,exclude).toLowerCase())+'">'+esc(effectiveQuality(c,exclude))+'</span></td><td>'+esc(effectiveDomain(c,exclude))+'</td></tr>').join(''):'<tr><td colspan="4">No Warning or Poor calls were identified in this period.</td></tr>')+'</tbody></table></section>'+
       '<footer>Diagnostic findings are based on available 3CX call-quality telemetry and should be correlated with reported symptoms and network evidence.</footer></article>';
     $('#reportPreview').classList.remove('hidden');
   }
