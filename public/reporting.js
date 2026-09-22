@@ -1,105 +1,68 @@
-// Client-facing reporting add-on for 3CX CQM.
-// Uses the analyser's in-browser DATA object; no call data leaves the browser.
+// 3CX Call Quality Analyser - client reporting v0.6.0
 (function(){
-  const $=s=>document.querySelector(s);
-  const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  const dt=v=>{const d=new Date(String(v||'').replace(' ','T'));return Number.isNaN(d.getTime())?null:d};
-  const pct=(n,d)=>d?Math.round(n*1000/d)/10:0;
-  const local=v=>typeof formatLocalDateTime==='function'?formatLocalDateTime(v):v;
-  function inPeriod(c,a,b){const d=dt(c.date_time);return d&&(!a||d>=a)&&(!b||d<=b)}
-  function reportCalls(){
-    const a=$('#reportStart').value?new Date($('#reportStart').value):null;
-    const b=$('#reportEnd').value?new Date($('#reportEnd').value):null;
-    return (DATA?.calls||[]).filter(c=>inPeriod(c,a,b));
-  }
-  function bucket(calls){
-    const out={};
-    calls.forEach(c=>{const d=dt(c.date_time);if(!d)return;const k=d.toLocaleDateString(undefined,{day:'2-digit',month:'short'});const q=effectiveQuality(c,$('#excludeNoRtcp')?.checked??true);const x=out[k]??={total:0,degraded:0};if(q!=='Inconclusive'){x.total++;if(q==='Poor'||q==='Warning')x.degraded++}});
-    return out;
-  }
-  function renderTrend(calls){
-    const b=bucket(calls),max=Math.max(1,...Object.values(b).map(x=>pct(x.degraded,x.total)));
-    return Object.entries(b).map(([k,x])=>{const p=pct(x.degraded,x.total);return '<div class="report-trend-row"><span>'+esc(k)+'</span><div><i style="width:'+Math.max(2,p/max*100)+'%"></i></div><strong>'+p+'%</strong></div>'}).join('')||'<p>No calls in selected period.</p>';
-  }
-  function intervention(){return $('#reportIntervention').value?new Date($('#reportIntervention').value):null}
-  function periodStats(calls,exclude){const s=summary(calls,exclude),bad=s.quality_counts.Poor+s.quality_counts.Warning;return {s,bad,rate:pct(bad,s.measurable_calls)}}
-  function compareBlock(calls,exclude){
-    const cut=intervention();if(!cut)return '<p class="report-note">Add an intervention time to compare quality before and after a change.</p>';
-    const before=calls.filter(c=>dt(c.date_time)<cut),after=calls.filter(c=>dt(c.date_time)>=cut),a=periodStats(before,exclude),b=periodStats(after,exclude);
-    const delta=Math.round((b.rate-a.rate)*10)/10,word=delta<0?'decreased':delta>0?'increased':'was unchanged';
-    return '<div class="report-compare"><div><span>Before change</span><b>'+a.rate+'%</b><small>'+a.bad+' degraded / '+a.s.measurable_calls+' measurable</small></div><div class="report-compare-arrow">→</div><div><span>After change</span><b>'+b.rate+'%</b><small>'+b.bad+' degraded / '+b.s.measurable_calls+' measurable</small></div></div><p class="report-note">Observed degradation '+word+' by '+Math.abs(delta)+' percentage points following the recorded intervention. This comparison shows correlation in time and does not by itself establish causation.</p>';
-  }
-  function pathAggregate(calls){
-    const keys=['A-B','A<-B','B-C','B<-C'];return keys.map(k=>{const xs=calls.map(c=>mediaPathSummary(c,k)).filter(x=>x.status!=='Unavailable'),poor=xs.filter(x=>x.status==='Poor').length,warn=xs.filter(x=>x.status==='Warning').length;return {label:xs[0]?.label||k,total:xs.length,poor,warn,rate:pct(poor+warn,xs.length)}})
-  }
-  function pathBlock(calls){
-    const paths=pathAggregate(calls), cls=x=>x.poor?'poor':x.warn?'warning':'good';
-    const cards='<div class="report-path-grid">'+paths.map(x=>'<div class="'+cls(x)+'"><strong>'+esc(x.label)+'</strong><b>'+x.rate+'%</b><span>degraded</span><small>'+x.poor+' poor · '+x.warn+' warning · '+x.total+' measured</small></div>').join('')+'</div>';
-    const topology='<div class="report-topology"><div class="report-node"><b>A</b><span>Endpoint A</span></div><div class="report-link"><span>'+esc(paths[0]?.rate??0)+'% →</span><span>← '+esc(paths[1]?.rate??0)+'%</span></div><div class="report-node pbx"><b>B</b><span>3CX PBX</span></div><div class="report-link"><span>'+esc(paths[2]?.rate??0)+'% →</span><span>← '+esc(paths[3]?.rate??0)+'%</span></div><div class="report-node"><b>C</b><span>Endpoint C</span></div></div>';
-    return topology+cards+'<p class="report-note">A and C represent call endpoints; B represents the 3CX PBX. Percentages show paths classified Warning or Poor where path telemetry was measurable.</p>';
-  }
-  function domainBlock(s){
-    const total=Math.max(1,s.total_calls);return '<div class="report-domain-list">'+Object.entries(s.domains).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div><span>'+esc(k)+'</span><i><em style="width:'+pct(v,total)+'%"></em></i><b>'+v+'</b></div>').join('')+'</div>';
-  }
-  function eventBlock(){
-    const cut=intervention(),label=$('#reportInterventionLabel').value.trim()||'Investigation change';
-    return cut?'<div class="report-event"><b>'+esc(cut.toLocaleString())+'</b><span>'+esc(label)+'</span></div>':'<p class="report-note">No intervention marker has been recorded.</p>';
-  }
-  function metricNarrative(s){
-    const parts=[];
-    if(Number.isFinite(s.avg_rtt)) parts.push('Average round-trip time was '+Math.round(s.avg_rtt)+' ms'+(s.avg_rtt>=150?', which is above the poor-quality threshold':s.avg_rtt>=100?', which is elevated':''));
-    if(Number.isFinite(s.avg_jitter)) parts.push('average jitter was '+Math.round(s.avg_jitter*10)/10+' ms'+(s.avg_jitter>=30?', which is high':s.avg_jitter>=20?', which is elevated':''));
-    if(Number.isFinite(s.avg_loss)) parts.push('average packet loss was '+Math.round(s.avg_loss*100)/100+'%'+(s.avg_loss>=1?', which is high':s.avg_loss>=.5?', which is elevated':''));
-    if(Number.isFinite(s.avg_mos)) parts.push('average MOS was '+Math.round(s.avg_mos*100)/100+(s.avg_mos<3.5?', indicating poor perceived voice quality':s.avg_mos<4?', indicating reduced perceived voice quality':''));
-    return parts.length?parts.join('; ')+'.':'No aggregate RTT, jitter, packet-loss or MOS measurements were available for this period.';
-  }
-  function endpointRows(calls,exclude){
-    const map={};
-    calls.forEach(c=>[c.party1,c.party2].filter(Boolean).forEach(p=>{const key=p.number||p.name||p.ip;if(!key)return;const x=map[key]??={name:p.name||p.number||key,number:p.number||'',calls:0,bad:0};x.calls++;if(['Poor','Warning'].includes(effectiveQuality(c,exclude)))x.bad++}));
-    return Object.values(map).filter(x=>x.bad).sort((a,b)=>b.bad-a.bad||b.calls-a.calls).slice(0,8);
-  }
-  function endpointBlock(calls,exclude){
-    const rows=endpointRows(calls,exclude);if(!rows.length)return '<p class="report-note">No repeatedly affected endpoints were identified in the selected period.</p>';
-    return '<table><thead><tr><th>Endpoint</th><th>Calls</th><th>Degraded</th><th>Degradation rate</th></tr></thead><tbody>'+rows.map(x=>'<tr><td>'+esc(x.name)+(x.number&&x.number!==x.name?' ('+esc(x.number)+')':'')+'</td><td>'+x.calls+'</td><td>'+x.bad+'</td><td>'+pct(x.bad,x.calls)+'%</td></tr>').join('')+'</tbody></table>';
-  }
-  function scopeText(calls){
-    const ds=calls.map(c=>dt(c.date_time)).filter(Boolean).sort((a,b)=>a-b);if(!ds.length)return 'No calls fall within the selected reporting period.';
-    return 'Telemetry in this report covers '+ds[0].toLocaleString()+' to '+ds.at(-1).toLocaleString()+'. Results reflect the call-quality data available from the 3CX Call Monitor export.';
-  }
-  function statusText(status,s){
-    const bad=s.quality_counts.Poor+s.quality_counts.Warning,rate=pct(bad,s.measurable_calls);
-    if(status==='Resolved')return 'The investigation is marked resolved. Current telemetry should continue to be considered alongside any new user reports.';
-    if(status==='Improved')return 'The investigation is marked improved. '+rate+'% of measurable calls in the selected period remain classified Warning or Poor.';
-    if(status==='Monitoring')return 'The investigation remains under monitoring. '+rate+'% of measurable calls in the selected period are classified Warning or Poor.';
-    return 'The investigation remains active while the identified quality indicators and affected call paths are being assessed.';
-  }
-  function summaryText(s,calls){
-    const degraded=s.quality_counts.Poor+s.quality_counts.Warning,p=pct(degraded,s.measurable_calls);
-    const top=Object.entries(s.domains).filter(([k])=>!['No Fault Detected','Insufficient Data'].includes(k)).sort((a,b)=>b[1]-a[1])[0];
-    const domain=top?(top[0]==='Customer / Site'?' The affected calls were predominantly associated with the customer-side audio path.':' The most frequently identified fault domain was '+top[0]+'.'):' No dominant fault domain was identified.';return calls.length?('During the selected monitoring period, '+s.total_calls+' calls were analysed and '+s.measurable_calls+' contained measurable quality data. '+p+'% of measurable calls showed warning or poor quality.'+domain):'No calls fall within the selected monitoring period.';
-  }
-  function generate(){
-    if(!DATA?.calls?.length)return;
-    const calls=reportCalls(),exclude=$('#excludeNoRtcp')?.checked??true,s=summary(calls,exclude);
-    const customer=$('#reportCustomer').value.trim()||'Customer',title=$('#reportTitle').value.trim()||'Call Quality Investigation Report',status=$('#reportStatus')?.value||'Investigating';
-    const poor=calls.filter(c=>['Poor','Warning'].includes(effectiveQuality(c,exclude))).slice(0,12);
-    $('#reportPreview').innerHTML='<article class="client-report"><header><span>CALL QUALITY MONITORING</span><h1>'+esc(title)+'</h1><div class="report-head-meta"><p>'+esc(customer)+'</p><span class="report-status '+esc(status.toLowerCase())+'">'+esc(status)+'</span></div></header>'+
-      '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p><p class="report-status-copy">'+esc(statusText(status,s))+'</p></section>'+
-      ($('#reportImpact').value.trim()?'<section><h2>Customer Impact</h2><p>'+esc($('#reportImpact').value.trim())+'</p></section>':'')+
-      '<section><h2>Monitoring Scope</h2><p>'+esc(scopeText(calls))+'</p></section>'+
-      '<section><h2>Monitoring Period</h2><div class="report-kpis"><div><b>'+s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+s.measurable_calls+'</b><span>Measurable calls</span></div><div><b>'+s.quality_counts.Poor+'</b><span>Poor calls</span></div><div><b>'+s.quality_counts.Warning+'</b><span>Warning calls</span></div></div></section>'+
-      '<section><h2>Quality Metrics</h2><p>'+esc(metricNarrative(s))+'</p><div class="report-metric-strip"><span><b>'+esc(Number.isFinite(s.avg_rtt)?Math.round(s.avg_rtt)+' ms':'—')+'</b>Avg RTT</span><span><b>'+esc(Number.isFinite(s.avg_jitter)?Math.round(s.avg_jitter*10)/10+' ms':'—')+'</b>Avg jitter</span><span><b>'+esc(Number.isFinite(s.avg_loss)?Math.round(s.avg_loss*100)/100+'%':'—')+'</b>Avg loss</span><span><b>'+esc(Number.isFinite(s.avg_mos)?Math.round(s.avg_mos*100)/100:'—')+'</b>Avg MOS</span></div></section><section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
-      (intervention()?'<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section><section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>':'')+
-      '<section><h2>Audio Path Findings</h2>'+pathBlock(calls)+'</section>'+
-      '<section><h2>Fault Domain Distribution</h2>'+domainBlock(s)+'</section>'+
-      '<section><h2>Affected Endpoints</h2><p class="report-note">Endpoints below are ranked by the number of calls classified Warning or Poor in the selected period.</p>'+endpointBlock(calls,exclude)+'</section>'+
-      '<section><h2>Investigation Findings</h2><p>'+esc($('#reportFindings').value.trim()||'Engineer findings have not yet been entered.')+'</p></section>'+
-      '<section><h2>Actions / Changes</h2><p>'+esc($('#reportActions').value.trim()||'No investigation actions have been recorded.')+'</p></section>'+
-      ($('#reportNextSteps').value.trim()?'<section><h2>Next Steps</h2><p>'+esc($('#reportNextSteps').value.trim())+'</p></section>':'')+
-      '<section><h2>Affected Call Examples</h2><p class="report-note">Representative Warning and Poor calls from the selected period, limited to 12 examples.</p><table><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Fault domain</th></tr></thead><tbody>'+(poor.length?poor.map(c=>'<tr><td>'+esc(local(c.date_time))+'</td><td>'+esc(c.party1.number)+' ↔ '+esc(c.party2.number)+'</td><td><span class="report-quality '+esc(effectiveQuality(c,exclude).toLowerCase())+'">'+esc(effectiveQuality(c,exclude))+'</span></td><td>'+esc(effectiveDomain(c,exclude))+'</td></tr>').join(''):'<tr><td colspan="4">No Warning or Poor calls were identified in this period.</td></tr>')+'</tbody></table></section>'+
-      '<footer>Diagnostic findings are based on available 3CX call-quality telemetry and should be correlated with reported symptoms and network evidence.</footer></article>';
-    $('#reportPreview').classList.remove('hidden');
-  }
-  window.openReporting=()=>{if(!DATA?.calls?.length)return alert('Load a Call Monitor CSV before creating a report.');$('#reporting').classList.remove('hidden');const ds=DATA.calls.map(c=>dt(c.date_time)).filter(Boolean).sort((a,b)=>a-b);if(ds.length){const iso=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)};if(!$('#reportStart').value)$('#reportStart').value=iso(ds[0]);if(!$('#reportEnd').value)$('#reportEnd').value=iso(ds.at(-1));}generate()};
-  document.addEventListener('DOMContentLoaded',()=>{$('#openReporting')?.addEventListener('click',()=>window.openReporting());$('#reportGenerate')?.addEventListener('click',generate);$('#reportPrint')?.addEventListener('click',()=>{generate();window.print()});$('#reportClose')?.addEventListener('click',()=>$('#reporting').classList.add('hidden'))});
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const pct=(n,d)=>d?Math.round(n*1000/d)/10:0, rnd=(n,d=1)=>Number.isFinite(n)?Math.round(n*10**d)/10**d:null;
+function dt(v){const raw=String(v||'').trim();if(!raw)return null;const iso=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/i.test(raw)?raw.replace(' ','T'):raw.replace(' ','T');const d=new Date(iso);return Number.isNaN(d.getTime())?null:d}
+const local=v=>typeof formatLocalDateTime==='function'?formatLocalDateTime(v):v;
+function range(){return {a:$('#reportStart').value?new Date($('#reportStart').value):null,b:$('#reportEnd').value?new Date($('#reportEnd').value):null}}
+function between(c,a,b){const d=dt(c.date_time);return d&&(!a||d>=a)&&(!b||d<=b)}
+function callsIn(a,b){return (DATA?.calls||[]).filter(c=>between(c,a,b))}
+function reportCalls(){const {a,b}=range();return callsIn(a,b)}
+function previousCalls(){const {a,b}=range();if(!a||!b||$('#reportComparison')?.value!=='previous')return[];const span=b-a+1;return callsIn(new Date(a-span),new Date(a-1))}
+function q(c,e){return effectiveQuality(c,e)} function dom(c,e){return effectiveDomain(c,e)}
+function vals(calls,e,key){const legs=calls.flatMap(c=>includedLegs(c,e));if(key==='rtt')return legs.map(x=>x.rtt).filter(Number.isFinite);if(key==='jitter')return legs.flatMap(x=>[x.rx_jitter,x.tx_jitter]).filter(x=>Number.isFinite(x)&&x<10000);if(key==='loss')return legs.flatMap(x=>[x.rx_loss_pct,x.tx_loss_pct]).filter(Number.isFinite);if(key==='mos')return legs.flatMap(x=>[x.mos_from_pbx,x.mos_to_pbx]).filter(x=>Number.isFinite(x)&&x>0);return[]}
+function quantile(a,p){if(!a.length)return null;const s=[...a].sort((x,y)=>x-y),i=(s.length-1)*p,l=Math.floor(i),h=Math.ceil(i);return s[l]+(s[h]-s[l])*(i-l)}
+function metrics(calls,e){const s=summary(calls,e),bad=s.quality_counts.Poor+s.quality_counts.Warning,m={s,bad,rate:pct(bad,s.measurable_calls),acceptable:pct(s.quality_counts.Good,s.measurable_calls)};for(const k of ['rtt','jitter','loss','mos']){const v=vals(calls,e,k);m[k]={typical:quantile(v,.5),p95:quantile(v,.95),worst:k==='mos'?quantile(v,.05):(v.length?Math.max(...v):null)}}return m}
+function delta(a,b){if(!Number.isFinite(a)||!Number.isFinite(b))return null;return rnd(a-b,1)}
+function deltaText(v,suffix=' pp',lowerBetter=false){if(v===null)return '—';const good=lowerBetter?v<0:v>0;return '<span class="report-delta '+(v===0?'flat':good?'better':'worse')+'">'+(v>0?'+':'')+v+suffix+'</span>'}
+function granularity(a,b){if(!a||!b)return'day';const days=(b-a)/86400000;return days>180?'month':days>60?'week':'day'}
+function periodKey(d,g){const x=new Date(d);if(g==='month')return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0');if(g==='week'){const day=(x.getDay()+6)%7;x.setHours(0,0,0,0);x.setDate(x.getDate()-day);return x.toISOString().slice(0,10)}return x.toISOString().slice(0,10)}
+function periodLabel(k,g){const d=new Date(k+'T00:00:00');return g==='month'?d.toLocaleDateString(undefined,{month:'short',year:'numeric'}):g==='week'?'W/C '+d.toLocaleDateString(undefined,{day:'numeric',month:'short'}):d.toLocaleDateString(undefined,{day:'numeric',month:'short'})}
+function buckets(calls,e){const {a,b}=range(),g=granularity(a,b),o={};calls.forEach(c=>{const d=dt(c.date_time);if(!d)return;const k=periodKey(d,g),x=o[k]??={calls:[],label:periodLabel(k,g)};x.calls.push(c)});return Object.entries(o).sort().map(([k,x])=>({key:k,label:x.label,...metrics(x.calls,e)}))}
+function spark(data,key,suffix=''){if(!data.length)return'<p class="report-note">No measurable data.</p>';const v=data.map(x=>x[key]).filter(Number.isFinite);if(!v.length)return'<p class="report-note">No measurable data.</p>';const min=Math.min(...v),max=Math.max(...v),w=760,h=180,p=28,span=max-min||1,pts=data.map((x,i)=>{const yv=Number.isFinite(x[key])?x[key]:min;return [p+i*(w-2*p)/Math.max(1,data.length-1),h-p-(yv-min)*(h-2*p)/span]}),path=pts.map((x,i)=>(i?'L':'M')+x[0].toFixed(1)+' '+x[1].toFixed(1)).join(' ');return '<div class="report-chart"><svg viewBox="0 0 '+w+' '+h+'" role="img"><line x1="'+p+'" y1="'+(h-p)+'" x2="'+(w-p)+'" y2="'+(h-p)+'"/><path d="'+path+'"/>'+pts.map((x,i)=>'<circle cx="'+x[0]+'" cy="'+x[1]+'" r="4"><title>'+esc(data[i].label)+': '+esc(data[i][key])+suffix+'</title></circle>').join('')+'</svg><div class="report-chart-labels"><span>'+esc(data[0].label)+'</span><span>'+esc(data.at(-1).label)+'</span></div></div>'}
+function trendData(calls,e){return buckets(calls,e).map(x=>({label:x.label,acceptable:x.acceptable,degraded:x.rate,volume:x.s.total_calls,rtt:rnd(x.rtt.p95),jitter:rnd(x.jitter.p95),loss:rnd(x.loss.p95,2),mos:rnd(x.mos.typical,2)}))}
+function qualityTrend(calls,e){const d=trendData(calls,e);return '<div class="report-chart-title"><b>Acceptable call rate</b><span>Good calls as a percentage of measurable calls</span></div>'+spark(d,'acceptable','%')+'<div class="report-period-grid">'+d.map(x=>'<div><b>'+esc(x.label)+'</b><span>'+x.acceptable+'% acceptable</span><small>'+x.volume+' calls · '+x.degraded+'% degraded</small></div>').join('')+'</div>'}
+function metricCards(m){const spec=[['RTT','rtt',' ms'],['Jitter','jitter',' ms'],['Packet loss','loss','%'],['MOS','mos','']];return '<div class="report-percentiles">'+spec.map(([n,k,u])=>'<div><h3>'+n+'</h3><span><small>Typical</small><b>'+fmtv(m[k].typical,u)+'</b></span><span><small>P95</small><b>'+fmtv(m[k].p95,u)+'</b></span><span><small>'+(k==='mos'?'Low end':'Worst')+'</small><b>'+fmtv(m[k].worst,u)+'</b></span></div>').join('')+'</div>'}
+function fmtv(v,u=''){return Number.isFinite(v)?rnd(v,u==='%'?2:1)+u:'—'}
+function compare(current,previous){if(!previous.s.total_calls)return'';return '<section><h2>Period Comparison</h2><p class="report-note">Current monitoring period compared with the immediately preceding period of equal duration.</p><table class="report-comparison"><thead><tr><th>Measure</th><th>Previous</th><th>Current</th><th>Change</th></tr></thead><tbody>'+
+row('Calls analysed',previous.s.total_calls,current.s.total_calls,delta(current.s.total_calls,previous.s.total_calls),'','')+
+row('Acceptable calls',previous.acceptable+'%',current.acceptable+'%',delta(current.acceptable,previous.acceptable),' pp',false)+
+row('Warning / Poor',previous.rate+'%',current.rate+'%',delta(current.rate,previous.rate),' pp',true)+
+row('P95 RTT',fmtv(previous.rtt.p95,' ms'),fmtv(current.rtt.p95,' ms'),delta(rnd(current.rtt.p95),rnd(previous.rtt.p95)),' ms',true)+
+row('P95 jitter',fmtv(previous.jitter.p95,' ms'),fmtv(current.jitter.p95,' ms'),delta(rnd(current.jitter.p95),rnd(previous.jitter.p95)),' ms',true)+
+row('P95 packet loss',fmtv(previous.loss.p95,'%'),fmtv(current.loss.p95,'%'),delta(rnd(current.loss.p95,2),rnd(previous.loss.p95,2)),' pp',true)+
+row('Typical MOS',fmtv(previous.mos.typical),fmtv(current.mos.typical),delta(rnd(current.mos.typical,2),rnd(previous.mos.typical,2)),'',false)+'</tbody></table></section>'}
+function row(n,a,b,d,u,lb){return'<tr><td>'+n+'</td><td>'+a+'</td><td><b>'+b+'</b></td><td>'+deltaText(d,u,lb)+'</td></tr>'}
+function endpointRows(calls,e){const map={};calls.forEach(c=>includedLegs(c,e).filter(l=>['LOCAL','TUNNEL'].includes(l.endpoint_type)).forEach(l=>{const k=l.number||l.address||'Unknown',x=map[k]??={name:k,calls:0,bad:0};x.calls++;const z=classifyLeg(l)[0];if(['Poor','Warning'].includes(z))x.bad++}));return Object.values(map).filter(x=>x.bad).sort((a,b)=>b.bad-a.bad||b.calls-a.calls)}
+function endpointBlock(calls,e){const rows=endpointRows(calls,e),total=rows.reduce((a,x)=>a+x.bad,0),top=rows.slice(0,8);return top.length?'<table><thead><tr><th>Endpoint</th><th>Measured calls</th><th>Degraded</th><th>Rate</th></tr></thead><tbody>'+top.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+x.calls+'</td><td>'+x.bad+'</td><td>'+pct(x.bad,x.calls)+'%</td></tr>').join('')+'</tbody></table><p class="report-note">'+(rows.length?rows.length+' local/tunnel endpoints recorded degradation. '+(top[0]?'The most affected endpoint accounted for '+pct(top[0].bad,total)+'% of endpoint degradation observations.':''):'')+'</p>':'<p class="report-note">No local/tunnel endpoints recorded Warning or Poor telemetry.</p>'}
+function timeBlock(calls,e){const slots=[['00:00–08:00',0,8],['08:00–10:00',8,10],['10:00–12:00',10,12],['12:00–14:00',12,14],['14:00–16:00',14,16],['16:00–18:00',16,18],['18:00–24:00',18,24]].map(([label,a,b])=>{const xs=calls.filter(c=>{const d=dt(c.date_time);return d&&d.getHours()>=a&&d.getHours()<b}),m=metrics(xs,e);return{label,total:m.s.measurable_calls,bad:m.bad,rate:m.rate}}).filter(x=>x.total);const mx=Math.max(1,...slots.map(x=>x.rate));return slots.length?'<div class="report-time-bars">'+slots.map(x=>'<div><span>'+x.label+'</span><i><em style="width:'+100*x.rate/mx+'%"></em></i><b>'+x.rate+'%</b><small>'+x.bad+'/'+x.total+'</small></div>').join('')+'</div>':'<p class="report-note">Insufficient data for time-of-day analysis.</p>'}
+function pathAggregate(calls){return ['A-B','A<-B','B-C','B<-C'].map(k=>{const xs=calls.map(c=>mediaPathSummary(c,k)).filter(x=>x.status!=='Unavailable'),poor=xs.filter(x=>x.status==='Poor').length,warn=xs.filter(x=>x.status==='Warning').length;return{label:xs[0]?.label||k,total:xs.length,poor,warn,rate:pct(poor+warn,xs.length)}})}
+function pathBlock(calls){const p=pathAggregate(calls);return'<div class="report-topology"><div class="report-node"><b>A</b><span>Endpoint A</span></div><div class="report-link"><span>'+p[0].rate+'% →</span><span>← '+p[1].rate+'%</span></div><div class="report-node pbx"><b>B</b><span>3CX PBX</span></div><div class="report-link"><span>'+p[2].rate+'% →</span><span>← '+p[3].rate+'%</span></div><div class="report-node"><b>C</b><span>Endpoint C</span></div></div><div class="report-path-grid">'+p.map(x=>'<div class="'+(x.poor?'poor':x.warn?'warning':'good')+'"><strong>'+esc(x.label)+'</strong><b>'+x.rate+'%</b><span>degraded</span><small>'+x.poor+' poor · '+x.warn+' warning · '+x.total+' measured</small></div>').join('')+'</div>'}
+function domainBlock(s){const total=Math.max(1,s.total_calls);return'<div class="report-domain-list">'+Object.entries(s.domains).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div><span>'+esc(k)+'</span><i><em style="width:'+pct(v,total)+'%"></em></i><b>'+v+'</b></div>').join('')+'</div>'}
+function insights(calls,m,prev,e){const a=[];if(prev?.s?.total_calls){const d=rnd(m.rate-prev.rate,1);if(Math.abs(d)>=1)a.push('The degraded-call rate '+(d<0?'decreased':'increased')+' by '+Math.abs(d)+' percentage points compared with the previous equivalent period.')}const ep=endpointRows(calls,e),eb=ep.reduce((s,x)=>s+x.bad,0);if(ep.length&&eb&&pct(ep[0].bad,eb)>=40)a.push('Degradation was concentrated around '+ep[0].name+', which represented '+pct(ep[0].bad,eb)+'% of affected local endpoint observations.');const bs=buckets(calls,e);if(bs.length>2){const bad=bs.filter(x=>x.rate>0),share=bad.length/bs.length;if(share<=.4&&bad.length)a.push('Quality degradation was intermittent rather than continuous, appearing in '+bad.length+' of '+bs.length+' reporting intervals.');}const domains=Object.entries(m.s.domains).filter(([k])=>!['No Fault Detected','Insufficient Data'].includes(k)).sort((a,b)=>b[1]-a[1]);if(domains[0])a.push('The most frequently identified diagnostic domain was '+domains[0][0]+', representing '+pct(domains[0][1],m.s.total_calls)+'% of analysed calls.');if(Number.isFinite(m.rtt.p95))a.push('95% of measured RTT observations were at or below '+rnd(m.rtt.p95)+' ms, while the highest observed RTT was '+fmtv(m.rtt.worst,' ms')+'.');if(!a.length)a.push('The available telemetry does not show a strong recurring degradation pattern within the selected period.');return a}
+function executive(m,prev){let s=m.s.total_calls+' calls were analysed, with '+m.s.measurable_calls+' containing measurable quality data. '+m.acceptable+'% of measurable calls were classified Good and '+m.rate+'% were Warning or Poor.';if(prev?.s?.total_calls){const d=rnd(m.rate-prev.rate,1);s+=' Compared with the previous equivalent period, the degraded-call rate '+(d<0?'improved by ':d>0?'increased by ':'was unchanged at ')+Math.abs(d)+' percentage points.'}return s}
+function intervention(){return $('#reportIntervention').value?new Date($('#reportIntervention').value):null}
+function interventionBlock(calls,e){const cut=intervention();if(!cut)return'';const before=metrics(calls.filter(c=>dt(c.date_time)<cut),e),after=metrics(calls.filter(c=>dt(c.date_time)>=cut),e),label=$('#reportInterventionLabel').value.trim()||'Recorded investigation change';return'<section><h2>Recorded Intervention</h2><div class="report-event"><b>'+esc(cut.toLocaleString())+'</b><span>'+esc(label)+'</span></div><div class="report-compare"><div><span>Before</span><b>'+before.rate+'%</b><small>Warning / Poor</small></div><div class="report-compare-arrow">→</div><div><span>After</span><b>'+after.rate+'%</b><small>Warning / Poor</small></div></div><p class="report-note">Observed change: '+Math.abs(rnd(after.rate-before.rate,1))+' percentage points '+(after.rate<before.rate?'lower':after.rate>before.rate?'higher':'difference')+' after the intervention. This is a time-based correlation and does not by itself establish causation.</p></section>'}
+function appendix(m,e){return $('#reportAppendix')?.checked?'<section class="report-appendix"><h2>Technical Appendix</h2><div class="report-appendix-grid"><div><b>RTCP scope</b><span>'+m.s.included_legs+' included media legs</span><span>'+m.s.excluded_legs+' excluded media legs</span></div><div><b>Quality thresholds</b><span>RTT warning &gt;100 ms / poor &gt;150 ms</span><span>Jitter warning &gt;20 ms / poor &gt;30 ms</span></div><div><b>Loss thresholds</b><span>Warning &gt;0.5% / poor &gt;1%</span><span>MOS warning &lt;4 / poor &lt;3.5</span></div><div><b>Method</b><span>Percentiles are calculated from included media-leg telemetry.</span><span>Diagnostic domains are indicators, not proof of root cause.</span></div></div></section>':''}
+function generate(){if(!DATA?.calls?.length)return;const calls=reportCalls(),prevCalls=previousCalls(),e=$('#excludeNoRtcp')?.checked??true,m=metrics(calls,e),pm=prevCalls.length?metrics(prevCalls,e):null,customer=$('#reportCustomer').value.trim()||'Customer',title=$('#reportTitle').value.trim()||'Call Quality Service Report',status=$('#reportStatus')?.value||'Investigating',poor=calls.filter(c=>['Poor','Warning'].includes(q(c,e))).slice(0,12),{a,b}=range(),td=trendData(calls,e);
+const period=a&&b?a.toLocaleDateString()+' – '+b.toLocaleDateString():'Selected monitoring period';
+$('#reportPreview').innerHTML='<article class="client-report"><header><span>CALL QUALITY ANALYTICS</span><h1>'+esc(title)+'</h1><div class="report-head-meta"><div><p>'+esc(customer)+'</p><small>'+esc(period)+'</small></div><span class="report-status '+esc(status.toLowerCase())+'">'+esc(status)+'</span></div></header>'+
+'<section class="report-summary"><h2>Executive Service Quality Overview</h2><p>'+esc(executive(m,pm))+'</p><div class="report-kpis"><div><b>'+m.s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+m.acceptable+'%</b><span>Acceptable</span></div><div><b>'+m.rate+'%</b><span>Warning / Poor</span></div><div><b>'+fmtv(m.rtt.p95,' ms')+'</b><span>P95 RTT</span></div></div></section>'+
+($('#reportImpact').value.trim()?'<section><h2>Customer Impact</h2><p>'+esc($('#reportImpact').value.trim())+'</p></section>':'')+
+'<section><h2>What the Data Indicates</h2><div class="report-insights">'+insights(calls,m,pm,e).map(x=>'<p>'+esc(x)+'</p>').join('')+'</div></section>'+
+'<section><h2>Quality Over Time</h2><p class="report-note">Trend aggregation automatically adjusts to the selected reporting period.</p>'+qualityTrend(calls,e)+'</section>'+
+compare(m,pm)+
+'<section><h2>Quality Indicators</h2><p>Typical, 95th-percentile and extreme observations provide more context than averages alone.</p>'+metricCards(m)+(td.length?'<div class="report-mini-trends"><div><b>P95 RTT over time</b>'+spark(td,'rtt',' ms')+'</div><div><b>P95 jitter over time</b>'+spark(td,'jitter',' ms')+'</div></div>':'')+'</section>'+
+'<section><h2>When Degradation Occurred</h2><p class="report-note">Warning / Poor calls as a percentage of measurable calls within each time window.</p>'+timeBlock(calls,e)+'</section>'+
+'<section><h2>Where Degradation Occurred</h2><h3>Audio paths</h3>'+pathBlock(calls)+'<h3 class="report-subhead">Diagnostic domains</h3>'+domainBlock(m.s)+'</section>'+
+'<section><h2>Affected Endpoints</h2>'+endpointBlock(calls,e)+'</section>'+
+interventionBlock(calls,e)+
+'<section><h2>Investigation Findings</h2><p>'+esc($('#reportFindings').value.trim()||'Engineer findings have not yet been entered.')+'</p></section>'+
+'<section><h2>Actions / Changes</h2><p>'+esc($('#reportActions').value.trim()||'No investigation actions have been recorded.')+'</p></section>'+
+($('#reportNextSteps').value.trim()?'<section><h2>Next Steps</h2><p>'+esc($('#reportNextSteps').value.trim())+'</p></section>':'')+
+'<section><h2>Representative Affected Calls</h2><p class="report-note">Up to 12 Warning or Poor calls from the selected period.</p><table><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Diagnostic domain</th></tr></thead><tbody>'+(poor.length?poor.map(c=>'<tr><td>'+esc(local(c.date_time))+'</td><td>'+esc(c.party1.number)+' ↔ '+esc(c.party2.number)+'</td><td><span class="report-quality '+q(c,e).toLowerCase()+'">'+q(c,e)+'</span></td><td>'+esc(dom(c,e))+'</td></tr>').join(''):'<tr><td colspan="4">No Warning or Poor calls were identified.</td></tr>')+'</tbody></table></section>'+
+appendix(m,e)+'<footer>Results are based on available 3CX Call Monitor telemetry. Diagnostic classifications identify patterns in the available measurements and should be correlated with reported symptoms, network evidence and carrier data.</footer></article>';
+$('#reportPreview').classList.remove('hidden')}
+window.openReporting=()=>{if(!DATA?.calls?.length)return alert('Load a Call Monitor CSV before creating a report.');$('#reporting').classList.remove('hidden');const ds=DATA.calls.map(c=>dt(c.date_time)).filter(Boolean).sort((a,b)=>a-b),iso=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)};if(ds.length){if(!$('#reportStart').value)$('#reportStart').value=iso(ds[0]);if(!$('#reportEnd').value)$('#reportEnd').value=iso(ds.at(-1))}generate()}
+document.addEventListener('DOMContentLoaded',()=>{$('#openReporting')?.addEventListener('click',window.openReporting);$('#reportGenerate')?.addEventListener('click',generate);$('#reportPrint')?.addEventListener('click',()=>{generate();window.print()});$('#reportClose')?.addEventListener('click',()=>$('#reporting').classList.add('hidden'))})
 })();
