@@ -21,6 +21,27 @@
     const b=bucket(calls),max=Math.max(1,...Object.values(b).map(x=>pct(x.degraded,x.total)));
     return Object.entries(b).map(([k,x])=>{const p=pct(x.degraded,x.total);return '<div class="report-trend-row"><span>'+esc(k)+'</span><div><i style="width:'+Math.max(2,p/max*100)+'%"></i></div><strong>'+p+'%</strong></div>'}).join('')||'<p>No calls in selected period.</p>';
   }
+  function intervention(){return $('#reportIntervention').value?new Date($('#reportIntervention').value):null}
+  function periodStats(calls,exclude){const s=summary(calls,exclude),bad=s.quality_counts.Poor+s.quality_counts.Warning;return {s,bad,rate:pct(bad,s.measurable_calls)}}
+  function compareBlock(calls,exclude){
+    const cut=intervention();if(!cut)return '<p class="report-note">Add an intervention time to compare quality before and after a change.</p>';
+    const before=calls.filter(c=>dt(c.date_time)<cut),after=calls.filter(c=>dt(c.date_time)>=cut),a=periodStats(before,exclude),b=periodStats(after,exclude);
+    const delta=Math.round((b.rate-a.rate)*10)/10,word=delta<0?'decreased':delta>0?'increased':'was unchanged';
+    return '<div class="report-compare"><div><span>Before change</span><b>'+a.rate+'%</b><small>'+a.bad+' degraded / '+a.s.measurable_calls+' measurable</small></div><div class="report-compare-arrow">→</div><div><span>After change</span><b>'+b.rate+'%</b><small>'+b.bad+' degraded / '+b.s.measurable_calls+' measurable</small></div></div><p class="report-note">Observed degradation '+word+' by '+Math.abs(delta)+' percentage points following the recorded intervention. This comparison shows correlation in time and does not by itself establish causation.</p>';
+  }
+  function pathAggregate(calls){
+    const keys=['A-B','A<-B','B-C','B<-C'];return keys.map(k=>{const xs=calls.map(c=>mediaPathSummary(c,k)).filter(x=>x.status!=='Unavailable'),poor=xs.filter(x=>x.status==='Poor').length,warn=xs.filter(x=>x.status==='Warning').length;return {label:xs[0]?.label||k,total:xs.length,poor,warn,rate:pct(poor+warn,xs.length)}})
+  }
+  function pathBlock(calls){
+    return '<div class="report-path-grid">'+pathAggregate(calls).map(x=>'<div class="'+(x.poor?'poor':x.warn?'warning':'good')+'"><strong>'+esc(x.label)+'</strong><b>'+x.rate+'%</b><span>degraded</span><small>'+x.poor+' poor · '+x.warn+' warning · '+x.total+' measured</small></div>').join('')+'</div><p class="report-note">A and C represent call endpoints; B represents the 3CX PBX. Percentages show paths classified Warning or Poor where path telemetry was measurable.</p>';
+  }
+  function domainBlock(s){
+    const total=Math.max(1,s.total_calls);return '<div class="report-domain-list">'+Object.entries(s.domains).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div><span>'+esc(k)+'</span><i><em style="width:'+pct(v,total)+'%"></em></i><b>'+v+'</b></div>').join('')+'</div>';
+  }
+  function eventBlock(){
+    const cut=intervention(),label=$('#reportInterventionLabel').value.trim()||'Investigation change';
+    return cut?'<div class="report-event"><b>'+esc(cut.toLocaleString())+'</b><span>'+esc(label)+'</span></div>':'<p class="report-note">No intervention marker has been recorded.</p>';
+  }
   function summaryText(s,calls){
     const degraded=s.quality_counts.Poor+s.quality_counts.Warning,p=pct(degraded,s.measurable_calls);
     const top=Object.entries(s.domains).filter(([k])=>!['No Fault Detected','Insufficient Data'].includes(k)).sort((a,b)=>b[1]-a[1])[0];
@@ -35,6 +56,10 @@
       '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p></section>'+
       '<section><h2>Monitoring Period</h2><div class="report-kpis"><div><b>'+s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+s.measurable_calls+'</b><span>Measurable calls</span></div><div><b>'+s.quality_counts.Poor+'</b><span>Poor calls</span></div><div><b>'+s.quality_counts.Warning+'</b><span>Warning calls</span></div></div></section>'+
       '<section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
+      '<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section>'+
+      '<section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>'+
+      '<section><h2>Audio Path Findings</h2>'+pathBlock(calls)+'</section>'+
+      '<section><h2>Fault Domain Distribution</h2>'+domainBlock(s)+'</section>'+
       '<section><h2>Investigation Findings</h2><p>'+esc($('#reportFindings').value.trim()||'Engineer findings have not yet been entered.')+'</p></section>'+
       '<section><h2>Actions / Changes</h2><p>'+esc($('#reportActions').value.trim()||'No investigation actions have been recorded.')+'</p></section>'+
       '<section><h2>Affected Call Examples</h2><table><thead><tr><th>Date / Time</th><th>Parties</th><th>Quality</th><th>Fault domain</th></tr></thead><tbody>'+poor.map(c=>'<tr><td>'+esc(local(c.date_time))+'</td><td>'+esc(c.party1.number)+' ↔ '+esc(c.party2.number)+'</td><td>'+esc(effectiveQuality(c,exclude))+'</td><td>'+esc(effectiveDomain(c,exclude))+'</td></tr>').join('')+'</tbody></table></section>'+
