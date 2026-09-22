@@ -14,7 +14,7 @@
   }
   function bucket(calls){
     const out={};
-    calls.forEach(c=>{const d=dt(c.date_time);if(!d)return;const k=d.toLocaleDateString(undefined,{day:'2-digit',month:'short'});const q=effectiveQuality(c,$('#excludeNoRtcp')?.checked??true);const x=out[k]??={total:0,degraded:0};x.total++;if(q==='Poor'||q==='Warning')x.degraded++});
+    calls.forEach(c=>{const d=dt(c.date_time);if(!d)return;const k=d.toLocaleDateString(undefined,{day:'2-digit',month:'short'});const q=effectiveQuality(c,$('#excludeNoRtcp')?.checked??true);const x=out[k]??={total:0,degraded:0};if(q!=='Inconclusive'){x.total++;if(q==='Poor'||q==='Warning')x.degraded++}});
     return out;
   }
   function renderTrend(calls){
@@ -45,7 +45,7 @@
   function summaryText(s,calls){
     const degraded=s.quality_counts.Poor+s.quality_counts.Warning,p=pct(degraded,s.measurable_calls);
     const top=Object.entries(s.domains).filter(([k])=>!['No Fault Detected','Insufficient Data'].includes(k)).sort((a,b)=>b[1]-a[1])[0];
-    return calls.length?('During the selected monitoring period, '+s.total_calls+' calls were analysed and '+s.measurable_calls+' contained measurable quality data. '+p+'% of measurable calls showed warning or poor quality.'+(top?' The most frequently identified fault domain was '+top[0]+'.':' No dominant fault domain was identified.')):'No calls fall within the selected monitoring period.';
+    const domain=top?(top[0]==='Customer / Site'?' The affected calls were predominantly associated with the customer-side audio path.':' The most frequently identified fault domain was '+top[0]+'.'):' No dominant fault domain was identified.';return calls.length?('During the selected monitoring period, '+s.total_calls+' calls were analysed and '+s.measurable_calls+' contained measurable quality data. '+p+'% of measurable calls showed warning or poor quality.'+domain):'No calls fall within the selected monitoring period.';
   }
   function generate(){
     if(!DATA?.calls?.length)return;
@@ -56,8 +56,7 @@
       '<section class="report-summary"><h2>Executive Summary</h2><p>'+esc(summaryText(s,calls))+'</p></section>'+
       '<section><h2>Monitoring Period</h2><div class="report-kpis"><div><b>'+s.total_calls+'</b><span>Calls analysed</span></div><div><b>'+s.measurable_calls+'</b><span>Measurable calls</span></div><div><b>'+s.quality_counts.Poor+'</b><span>Poor calls</span></div><div><b>'+s.quality_counts.Warning+'</b><span>Warning calls</span></div></div></section>'+
       '<section><h2>Quality Progression</h2><p class="report-note">Percentage of measurable calls classified Warning or Poor by day.</p><div class="report-trend">'+renderTrend(calls)+'</div></section>'+
-      '<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section>'+
-      '<section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>'+
+      (intervention()?'<section><h2>Recorded Intervention</h2>'+eventBlock()+'</section><section><h2>Before / After Comparison</h2>'+compareBlock(calls,exclude)+'</section>':'')+
       '<section><h2>Audio Path Findings</h2>'+pathBlock(calls)+'</section>'+
       '<section><h2>Fault Domain Distribution</h2>'+domainBlock(s)+'</section>'+
       '<section><h2>Investigation Findings</h2><p>'+esc($('#reportFindings').value.trim()||'Engineer findings have not yet been entered.')+'</p></section>'+
